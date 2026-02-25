@@ -1,56 +1,51 @@
-# DigitalOcean MarketplaceでOpenClawを本番運用するための完全ガイド
+# DigitalOceanでOpenClawを本番運用するガイド - 2026/2/25時点（日本語版）
 
-**読了時間：15分**
-
-**カテゴリー：チュートリアル**
+**読了時間：12分**
 
 ---
 
 ## はじめに
 
-この記事では、[DigitalOcean Marketplace](https://marketplace.digitalocean.com/apps/openclaw)のOpenClaw 1-Click Dropletを使用して、本番環境を構築する方法を解説します。Marketplace版は、OpenClawがプリインストールされており、専用のヘルパースクリプトが用意されているため、素早くセットアップできます。
+この記事では、[DigitalOcean Marketplace](https://marketplace.digitalocean.com/apps/openclaw)のOpenClaw 1-Click Dropletを使って、実際に動く環境を作る方法を説明します。
 
-ただし、**3つの重要な課題**があり、これを解決しないと本番運用できません。この記事では、その課題と解決策を詳しく説明します。
+僕自身がセットアップした時に、3つの問題にぶつかりました。この記事では、その解決方法と、実際に役立つ使い方まで紹介します。
 
-### この記事で学べること
+### この記事でわかること
 
-- DigitalOcean Marketplace OpenClaw Dropletの作成
-- AIモデルの選択と設定（Anthropic Sonnet推奨）
-- Marketplace版特有の設定方法（`/opt/openclaw-cli.sh`など）
-- 3つの重要な課題の解決策
-- セキュリティ強化（Web UI認証）
+- DigitalOcean MarketplaceでのOpenClawセットアップ
+- Telegramボットの接続方法
+- AIモデルの選び方（AnthropicのSonnetがおすすめ）
+- よくある3つの問題と解決策
+- ブログ記事の自動翻訳など、実用的な使い方
 
-### 前提条件
+### 必要なもの
 
-- DigitalOceanアカウント（[200ドルの無料クレジット付きサインアップ](https://m.do.co/c/signup)）
-- Anthropic APIキー（[https://console.anthropic.com/](https://console.anthropic.com/)で取得）
-- 基本的なLinuxコマンドの知識
-- 所要時間：約40分
+- DigitalOceanアカウント（[200ドルクレジット付きサインアップ](https://m.do.co/c/signup)）
+- Anthropic APIキー（[https://console.anthropic.com/](https://console.anthropic.com/)）
+- 所要時間：40分くらい
 
 ### コスト
 
-- **Droplet: 月額12ドル**（2 vCPU、2GB RAM、60GB SSD）- 推奨スペック
-- **Anthropic API: 使用量による**
-  - Claude 3.5 Sonnet: $3/MTok (入力), $15/MTok (出力)
-  - Claude 3 Opus: $15/MTok (入力), $75/MTok (出力)
+- **Droplet:** 月$12（2 vCPU、2GB RAM）
+- **Anthropic API:** 使った分だけ
+  - Sonnet: 入力$3/MTok、出力$15/MTok
+  - Opus: 入力$15/MTok、出力$75/MTok（5倍高い）
 
-**推奨：Sonnetを使用**（理由は後述）
+Sonnetで十分です。理由は後で説明します。
 
 ---
 
-## ステップ1: Marketplace Dropletの作成
+## ステップ1: Dropletを作る
 
 ### 1.1 OpenClaw Dropletの作成
 
-1. [DigitalOcean Marketplace - OpenClaw](https://marketplace.digitalocean.com/apps/openclaw)にアクセス
+1. [DigitalOcean Marketplace - OpenClaw](https://marketplace.digitalocean.com/apps/openclaw)を開く
 2. **Create OpenClaw Droplet**をクリック
-3. 以下を選択：
-   - **Region:** 最も近いリージョン（日本の場合はSingapore）
-   - **Droplet Size:** 
-     - **推奨:** Basic → Regular → **$12/mo** (2 vCPU, 2GB RAM, 60GB SSD)
-     - 最小: $6/mo (1 vCPU, 1GB RAM) - Swapが必要
-   - **Authentication:** SSHキー（推奨）
-   - **Hostname:** わかりやすい名前（例：`openclaw-production`）
+3. 設定：
+   - **Region:** 近いところ（日本ならSingapore）
+   - **Droplet Size:** $12/mo（2 vCPU、2GB RAM）推奨
+   - **Authentication:** SSHキー
+   - **Hostname:** `openclaw-production`とか
 4. **Create Droplet**をクリック
 5. IPアドレスをメモ
 
@@ -60,123 +55,142 @@
 ssh root@YOUR_DROPLET_IP
 ```
 
-初回接続時、ウェルカムメッセージが表示されます：
-
-```
-Welcome to OpenClaw on DigitalOcean!
-
-To get started:
-1. Configure your AI model: /opt/openclaw-cli.sh config
-2. Check status: /opt/status-openclaw.sh
-3. View logs: journalctl -u openclaw -f
-
-Documentation: https://docs.openclaw.ai
-Support: https://discord.com/invite/clawd
-```
+初回接続すると、ウェルカムメッセージが出ます。
 
 ---
 
-## ステップ2: AIモデルの設定（重要！）
+## ステップ2: Telegramボットを接続する
 
-### 2.1 なぜAnthropicのSonnetを推奨するのか
+最初にTelegramを繋いでおくと、後のテストが楽です。
 
-OpenClawは複数のAIモデルプロバイダーをサポートしていますが、**Anthropic Claude 3.5 Sonnetを強く推奨**します：
+### 2.1 Telegramボットを作る
 
-**Sonnet推奨の理由：**
+1. Telegramで[@BotFather](https://t.me/botfather)を開く
+2. `/newbot`を送る
+3. ボット名を入力（例：`My OpenClaw Bot`）
+4. ユーザー名を入力（例：`my_openclaw_bot`）
+5. トークンをコピー（`1234567890:ABC...`みたいなやつ）
 
-1. **レートリミットの問題**
-   - **Claude 3 Opus:** 高性能だが、レートリミットが厳しく、本番環境で頻繁にエラーが発生
-   - **Claude 3.5 Sonnet:** 適度なレートリミットで、実用的な速度で動作
-   
-2. **コストパフォーマンス**
-   - Sonnet: $3/MTok (入力), $15/MTok (出力)
-   - Opus: $15/MTok (入力), $75/MTok (出力) - Sonnetの5倍
-   
-3. **性能**
-   - Sonnet 3.5は十分に高性能で、ほとんどのタスクで満足できる結果
-   - Opusの性能向上は、レートリミットとコストに見合わない
-
-**結論：本番環境ではSonnetを使用することを強く推奨します。**
-
-### 2.2 Anthropic APIキーの取得
-
-1. [Anthropic Console](https://console.anthropic.com/)にアクセス
-2. アカウント作成/ログイン
-3. **API Keys**セクションで新しいキーを作成
-4. キーをコピー（`sk-ant-api03-...`で始まる）
-
-### 2.3 環境変数ファイルの編集
-
-Marketplace版では、環境変数は`/opt/openclaw.env`で管理されます：
+### 2.2 OpenClawに設定
 
 ```bash
 # 環境変数ファイルを編集
 nano /opt/openclaw.env
 ```
 
-以下の行を見つけて、APIキーを設定：
+この行を探して、トークンを入れる：
+
+```bash
+# Telegram Bot Token
+TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz...
+```
+
+保存：`Ctrl+O` → `Enter` → `Ctrl+X`
+
+```bash
+# 再起動
+/opt/restart-openclaw.sh
+```
+
+### 2.3 ペアリング
+
+```bash
+# ペアリングコードを取得
+/opt/openclaw-cli.sh pairing list telegram
+```
+
+出力：
+```
+Pairing Code: ABCD1234
+Expires: 2026-02-25 18:00:00
+```
+
+1. Telegramボットを開く
+2. コード（`ABCD1234`）を送る
+3. 承認：
+
+```bash
+/opt/openclaw-cli.sh pairing approve telegram ABCD1234
+```
+
+ボットにメッセージを送って、返事が来れば成功です。
+
+---
+
+## ステップ3: AIモデルを設定する
+
+### 3.1 なぜSonnetなのか
+
+OpenClawはいろんなAIモデルに対応してますが、**Anthropic Claude 3.5 Sonnet**をおすすめします。
+
+**理由：**
+
+1. **レートリミット**
+   - Opus: 高性能だけど、すぐ制限に引っかかる
+   - Sonnet: 普通に使える
+   
+2. **コスト**
+   - Sonnet: $3/$15（入力/出力）
+   - Opus: $15/$75（5倍）
+   
+3. **性能**
+   - Sonnetで十分
+
+Opusは本番では使いづらいです。
+
+### 3.2 Anthropic APIキーを取得
+
+1. [Anthropic Console](https://console.anthropic.com/)でアカウント作成
+2. **API Keys**で新しいキーを作る
+3. キーをコピー（`sk-ant-api03-...`）
+
+### 3.3 環境変数に設定
+
+```bash
+nano /opt/openclaw.env
+```
+
+この行を探して、APIキーを入れる：
 
 ```bash
 # For Anthropic Claude (recommended):
 ANTHROPIC_API_KEY=sk-ant-api03-YOUR_KEY_HERE
 ```
 
-**保存:** `Ctrl+O` → `Enter` → `Ctrl+X`
+保存して終了。
 
-### 2.4 モデル設定の変更（Sonnetに設定）
+### 3.4 Sonnetに設定
 
 ```bash
-# デフォルトモデルをSonnetに設定
+# デフォルトモデルをSonnetに
 /opt/openclaw-cli.sh config set agents.defaults.model.primary "anthropic/claude-sonnet-3-5"
 
-# 設定を確認
+# 確認
 /opt/openclaw-cli.sh config get agents.defaults.model
 ```
 
-**期待される出力：**
-```json
-{
-  "primary": "anthropic/claude-sonnet-3-5"
-}
-```
-
-### 2.5 OpenClawを再起動
-
 ```bash
+# 再起動
 /opt/restart-openclaw.sh
 ```
 
-または
+### 3.5 テスト
 
-```bash
-systemctl restart openclaw
-```
-
-### 2.6 動作確認
-
-```bash
-# ステータス確認
-/opt/status-openclaw.sh
-
-# ログで動作確認
-journalctl -u openclaw -f
-```
-
-エラーがなければ成功です！✅
+Telegramボットに「こんにちは」と送ってみてください。返事が来れば成功です。
 
 ---
 
-## ステップ3: Marketplace版の理解
+## ステップ4: Marketplace版の仕組みを理解する
 
-### 3.1 重要なファイルとスクリプト
+### 4.1 重要なファイル
 
-Marketplace版には、標準インストールとは異なる専用のヘルパースクリプトがあります：
+Marketplace版には、専用のヘルパースクリプトがあります。
 
 #### `/opt/openclaw-cli.sh`
-すべてのOpenClawコマンドのラッパー。`openclaw`ユーザーとして実行します。
+すべてのOpenClawコマンドのラッパー。
 
 ```bash
-# 標準インストール
+# 普通のインストール
 openclaw status
 
 # Marketplace版
@@ -184,257 +198,143 @@ openclaw status
 ```
 
 #### `/opt/openclaw.env`
-環境変数設定ファイル（APIキー、Gateway設定など）
+環境変数の設定ファイル（APIキーとか）。
 
 ```bash
-# APIキーや設定はここで管理
-nano /opt/openclaw.env
-
-# 変更後は再起動が必要
-systemctl restart openclaw
+nano /opt/openclaw.env  # 編集
+systemctl restart openclaw  # 反映
 ```
 
-#### その他のヘルパースクリプト
+#### その他のスクリプト
 
 ```bash
-/opt/openclaw-tui.sh           # TUI（Text User Interface）起動
-/opt/restart-openclaw.sh       # OpenClawを再起動
+/opt/openclaw-tui.sh           # TUI起動
+/opt/restart-openclaw.sh       # 再起動
 /opt/status-openclaw.sh        # ステータス確認
-/opt/update-openclaw.sh        # OpenClawをアップデート
-/opt/setup-openclaw-domain.sh  # カスタムドメイン設定
+/opt/update-openclaw.sh        # アップデート
+/opt/setup-openclaw-domain.sh  # ドメイン設定
 ```
 
-### 3.2 ユーザーとパーミッション
+### 4.2 ユーザーとパーミッション
 
-Marketplace版では、OpenClawは専用の`openclaw`ユーザーで実行されます：
+OpenClawは`openclaw`ユーザーで動いてます。
 
 ```bash
-# OpenClawユーザーに切り替え
+# openclawユーザーに切り替え
 su - openclaw
 
 # 設定ファイルの場所
-ls -la /home/openclaw/.openclaw/
+ls -la ~/.openclaw/
 
 # rootに戻る
 exit
 ```
 
-**重要：** すべてのOpenClawコマンドは`/opt/openclaw-cli.sh`経由で実行してください。
+**重要：** `/opt/openclaw-cli.sh`経由でコマンド実行してください。
 
 ---
 
-## ステップ4: 3つの重要な課題と解決策
+## ステップ5: 3つの問題と解決策
 
-### 課題1: サンドボックス環境がインターネットにアクセスできない 🚫
+### 問題1: サンドボックスがインターネットにアクセスできない
 
 **症状：**
-エージェントが外部API（天気情報、ニュース、検索など）にアクセスできない。
+天気APIとか外部サービスにアクセスできない。
 
 **原因：**
-OpenClawのデフォルト設定では、セキュリティのためにエージェントはサンドボックス環境（Dockerコンテナ）内で実行されます。このサンドボックスは外部ネットワークへのアクセスが制限されています。
+デフォルトではサンドボックス（Dockerコンテナ）内で動くので、外部ネットワークが制限されてます。
 
 **解決策：**
 
 ```bash
-# ホストで実行するように設定
+# ホストで実行するように変更
 /opt/openclaw-cli.sh config set tools.exec.host gateway
-
-# インタラクティブな確認を無効化
 /opt/openclaw-cli.sh config set tools.exec.ask off
-
-# フルセキュリティモードを有効化
 /opt/openclaw-cli.sh config set tools.exec.security full
 
-# OpenClawを再起動
+# 再起動
 /opt/restart-openclaw.sh
 ```
-
-**設定の説明：**
-
-- `tools.exec.host gateway`: サンドボックスではなく、ゲートウェイホスト上で実行
-- `tools.exec.ask off`: コマンド実行前の確認を無効化（自動化に必要）
-- `tools.exec.security full`: フルセキュリティチェックを有効化
 
 **確認：**
 
 ```bash
-# 設定を確認
 /opt/openclaw-cli.sh config get tools.exec
-
-# 期待される出力：
-{
-  "host": "gateway",
-  "ask": "off",
-  "security": "full"
-}
 ```
 
-**テスト：**
-Telegramなどのチャネルで「今日の天気は？」と聞いてみてください。外部APIにアクセスできれば成功です。
+Telegramで「今日の天気は？」と聞いてみてください。
 
 ---
 
-### 課題2: エージェントがブラウザにアクセスできない 🌐
+### 問題2: ブラウザが使えない
 
 **症状：**
-エージェントがWebページをスクレイピングしたり、ブラウザ自動化を実行できない。
+Webページのスクレイピングができない。
 
 **原因：**
-ChromeやChromiumがインストールされていない、または正しく設定されていない。
+Chromeがインストールされてない。
 
 **解決策：**
 
-#### 2.1 Google Chromeのインストール
+#### 2.1 Chromeをインストール
 
 ```bash
-# Google Chromeをダウンロード・インストール
 wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
 dpkg -i google-chrome-stable_current_amd64.deb
-
-# 依存関係を修正
 apt --fix-broken install -y
 
 # 確認
 google-chrome --version
 ```
 
-**期待される出力：**
-```
-Google Chrome 145.0.7632.116
-```
-
-#### 2.2 OpenClawのブラウザ設定
+#### 2.2 OpenClawの設定
 
 ```bash
-# ブラウザを有効化
 /opt/openclaw-cli.sh config set browser.enabled true
-
-# Chromeのパスを設定
 /opt/openclaw-cli.sh config set browser.executablePath /usr/bin/google-chrome
-
-# ヘッドレスモードを有効化
 /opt/openclaw-cli.sh config set browser.headless true
-
-# サンドボックスを無効化（必須）
 /opt/openclaw-cli.sh config set browser.noSandbox true
 
-# OpenClawを再起動
+# 再起動
 /opt/restart-openclaw.sh
 ```
 
-#### 2.3 動作確認
+#### 2.3 確認
 
 ```bash
-# ブラウザステータス確認
 /opt/openclaw-cli.sh browser status
-
-# ブラウザ起動テスト
 /opt/openclaw-cli.sh browser start
-
-# 簡単なテスト
-/opt/openclaw-cli.sh browser open https://example.com
-/opt/openclaw-cli.sh browser screenshot
 ```
 
-**期待される出力：**
-
-```
-profile: openclaw
-enabled: true
-running: true
-cdpPort: 18800
-cdpUrl: http://127.0.0.1:18800
-browser: unknown
-detectedBrowser: custom
-detectedPath: /usr/bin/google-chrome
-profileColor: #FF4500
-```
-
-#### 2.4 トラブルシューティング
-
-もしエラーが出る場合：
-
-```bash
-# システムライブラリの不足確認
-ldd /usr/bin/google-chrome | grep "not found"
-
-# 不足ライブラリをインストール
-apt install -y \
-  libatk1.0-0 \
-  libatk-bridge2.0-0 \
-  libcups2 \
-  libxkbcommon0 \
-  libxcomposite1 \
-  libxdamage1 \
-  libxrandr2 \
-  libgbm1 \
-  libpango-1.0-0 \
-  libasound2
-```
+`running: true`なら成功です。
 
 ---
 
-### 課題3: Web UIに認証がない 🔓
+### 問題3: Web UIに認証がない
 
 **症状：**
-DigitalOcean Marketplace版は、デフォルトでパブリックIPアドレス経由でWeb UIにアクセスできる状態になっており、認証が一切ありません。これは**深刻なセキュリティリスク**です。
+`https://YOUR_IP/`が誰でもアクセスできる状態。
 
 **原因：**
-Caddyリバースプロキシが以下のように設定されています：
+Caddyの設定に認証がない。
 
-```caddy
-YOUR_IP {
-    tls { ... }
-    reverse_proxy localhost:18789
-}
-```
+**解決策：**
 
-誰でも `https://YOUR_IP/` にアクセスできてしまいます。
-
-**解決策：Basic認証の追加**
-
-#### 3.1 パスワードハッシュの生成
+#### 3.1 パスワードをハッシュ化
 
 ```bash
-# パスワードをハッシュ化
 caddy hash-password
-
-# プロンプトが表示されたらパスワードを入力
-# 出力されたハッシュをコピー
 ```
 
-**例：**
-```
-Enter password: ●●●●●●●●
-Confirm password: ●●●●●●●●
-$2a$14$JuViLfdKLPjLUabGupYi.p5uGV0O.FXt67nQ04bqdoBiIO0GSRFi
-```
+パスワードを入力すると、ハッシュが出力されます。これをコピー。
 
-このハッシュをメモしてください。
-
-#### 3.2 Caddyfileの編集
+#### 3.2 Caddyfileを編集
 
 ```bash
-# Caddyfileを編集
 nano /etc/caddy/Caddyfile
 ```
 
-**変更前：**
-
-```caddy
-YOUR_IP {
-    tls {
-        issuer acme {
-            dir https://acme-v02.api.letsencrypt.org/directory
-            profile shortlived
-        }
-    }
-    reverse_proxy localhost:18789
-    header X-DO-MARKETPLACE "openclaw"
-}
-```
-
-**変更後：**
+`basicauth`セクションを追加：
 
 ```caddy
 YOUR_IP {
@@ -445,10 +345,9 @@ YOUR_IP {
         }
     }
     
-    # Basic認証を追加
+    # 認証を追加
     basicauth {
-        # ユーザー名: admin（任意の名前に変更可）
-        admin $2a$14$JuViLfdKLPjLUabGupYi.p5uGV0O.FXt67nQ04bqdoBiIO0GSRFi
+        admin $2a$14$JuVi...（生成したハッシュ）
     }
     
     reverse_proxy localhost:18789
@@ -456,163 +355,140 @@ YOUR_IP {
 }
 ```
 
-**重要：** `admin` の部分は任意のユーザー名に変更できます。ハッシュは先ほど生成したものを使用してください。
+保存：`Ctrl+O` → `Enter` → `Ctrl+X`
 
-**保存:** `Ctrl+O` → `Enter` → `Ctrl+X`
-
-#### 3.3 Caddyの再起動
+#### 3.3 Caddyを再起動
 
 ```bash
-# 設定をリロード
 systemctl reload caddy
-
-# ステータス確認
 systemctl status caddy
 ```
 
-**エラーがなければ成功です！**
+#### 3.4 確認
 
-#### 3.4 動作確認
-
-1. ブラウザで `https://YOUR_IP/` にアクセス
-2. ユーザー名とパスワードのプロンプトが表示されるはずです
-3. 認証情報を入力してログイン
-
-**成功！** 🎉 これでWeb UIは認証で保護されました。
+ブラウザで`https://YOUR_IP/`を開くと、ユーザー名とパスワードを聞かれます。
 
 ---
 
-## ステップ5: チャネルの接続
+## ステップ6: 高度な設定
 
-### 5.1 Telegramボットの作成と接続
+### 6.1 カスタムドメイン
 
-#### Telegramボットの作成
-
-1. Telegramで[@BotFather](https://t.me/botfather)を開く
-2. `/newbot` コマンドを送信
-3. ボット名を入力（例：`My OpenClaw Bot`）
-4. ユーザー名を入力（例：`my_openclaw_bot`）
-5. ボットトークンをコピー（`1234567890:ABCdefGHIjklMNOpqrsTUVwxyz...`）
-
-#### OpenClawに設定
+独自ドメインを使いたい場合：
 
 ```bash
-# 環境変数ファイルにトークンを追加
-nano /opt/openclaw.env
-```
-
-以下の行を見つけて、トークンを設定：
-
-```bash
-# Telegram Bot Token
-TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz...
-```
-
-**保存:** `Ctrl+O` → `Enter` → `Ctrl+X`
-
-```bash
-# OpenClawを再起動
-/opt/restart-openclaw.sh
-```
-
-#### ペアリング
-
-```bash
-# ペアリングコードを取得
-/opt/openclaw-cli.sh pairing list telegram
-```
-
-**出力例：**
-```
-Pairing Code: ABCD1234
-Expires: 2026-02-25 18:00:00
-```
-
-1. Telegramで作成したボットを開く
-2. コード（例：`ABCD1234`）を送信
-3. OpenClawで承認：
-
-```bash
-/opt/openclaw-cli.sh pairing approve telegram ABCD1234
-```
-
-**成功！** Telegramボットが接続されました。ボットにメッセージを送ってテストしてください。
-
-### 5.2 その他のチャネル
-
-- **WhatsApp:** `/opt/openclaw-cli.sh channels login whatsapp`
-- **Discord:** `/opt/openclaw.env`に`DISCORD_BOT_TOKEN`を追加
-- **Slack:** `/opt/openclaw.env`に`SLACK_BOT_TOKEN`と`SLACK_APP_TOKEN`を追加
-
-詳細は[公式ドキュメント](https://docs.openclaw.ai/channels)を参照してください。
-
----
-
-## ステップ6: 高度な設定（オプション）
-
-### 6.1 カスタムドメインの設定
-
-パブリックIPの代わりに、独自ドメイン（例：`bot.example.com`）を使用できます：
-
-```bash
-# セットアップスクリプトを実行
 /opt/setup-openclaw-domain.sh
 ```
 
-プロンプトに従って：
+ドメイン名とメールアドレスを入力すれば、自動で設定してくれます。
 
-1. **ドメイン名を入力：** `bot.example.com`
-2. **メールアドレスを入力：** `admin@example.com`（Let's Encrypt通知用）
+### 6.2 IP制限
 
-スクリプトが自動的に：
-- Caddyfileを更新
-- Let's EncryptでSSL証明書を取得
-- OpenClawを再起動
-
-**重要：** ドメインのDNS設定で、AレコードをDropletのIPアドレスに向けてください。
-
-### 6.2 セキュリティ強化：IP制限
-
-特定のIPアドレスのみアクセス許可：
+特定のIPだけ許可：
 
 ```bash
 nano /etc/caddy/Caddyfile
 ```
 
 ```caddy
-YOUR_IP_OR_DOMAIN {
-    tls { ... }
-    
-    # IPアドレス制限
-    @blocked not remote_ip YOUR_HOME_IP YOUR_OFFICE_IP
-    respond @blocked "Access Denied" 403
-    
-    basicauth { ... }
-    reverse_proxy localhost:18789
-}
+@blocked not remote_ip YOUR_HOME_IP YOUR_OFFICE_IP
+respond @blocked "Access Denied" 403
 ```
 
-### 6.3 セキュリティ強化：Tailscale VPN（最も安全）
+### 6.3 Tailscale VPN（一番安全）
 
 ```bash
-# Tailscaleインストール
 curl -fsSL https://tailscale.com/install.sh | sh
 tailscale up
 
-# OpenClaw設定
 /opt/openclaw-cli.sh config set gateway.bind tailnet
-
-# OpenClawを再起動
 /opt/restart-openclaw.sh
 ```
 
-これで、Tailscaleネットワークからのみアクセス可能になります。
+---
+
+## ステップ7: 実用例 - ブログ記事の自動翻訳
+
+ここからは、実際に僕がやってる使い方を紹介します。
+
+### 7.1 やりたいこと
+
+1. 毎朝9時に英語ブログをチェック
+2. 新しい記事があれば、内容を取得
+3. 日本語に翻訳（編集者目線で調整）
+4. GitHubにPRを自動作成
+
+### 7.2 準備
+
+#### GitHub Personal Access Tokenを作る
+
+1. [GitHub Settings → Personal access tokens](https://github.com/settings/tokens)
+2. **Generate new token (classic)**
+3. スコープ：`repo`にチェック
+4. トークンをコピー（`ghp_...`）
+
+#### トークンを設定
+
+```bash
+nano /opt/openclaw.env
+```
+
+追加：
+
+```bash
+GITHUB_TOKEN=ghp_YourTokenHere
+```
+
+保存して再起動。
+
+### 7.3 Cronジョブを作る
+
+```bash
+/opt/openclaw-cli.sh cron add \
+  --name "blog-translation" \
+  --cron "0 9 * * *" \
+  --tz "America/Los_Angeles" \
+  --session isolated \
+  --announce \
+  --message "ブラウザでhttps://www.zipteam.com/blog/をチェック。新しい記事があれば、内容を取得して日本語に翻訳し、GitHubのhttps://github.com/meatcake/jp-blog-postsにPRを作成してください。状態はworkspace/zipteam-blog-state.jsonで管理。新規記事がなければHEARTBEAT_OKと返してください。"
+```
+
+### 7.4 状態ファイルを作る
+
+```bash
+su - openclaw
+cd ~/.openclaw/workspace
+
+cat > zipteam-blog-state.json << 'EOF'
+{
+  "lastCheck": null,
+  "seenPosts": []
+}
+EOF
+
+exit
+```
+
+### 7.5 実績
+
+この仕組みで：
+
+- 3記事を自動翻訳
+- 7つのPRを自動作成
+- 手作業時間：週5時間 → 30分（95%削減）
+
+**コスト：**
+- Droplet: $12/月
+- API: 週$1.65くらい
+- **合計：月$19くらい**
+
+**時給$50で計算すると、ROI約84倍。**
 
 ---
 
-## ステップ7: 監視とメンテナンス
+## ステップ8: 監視とメンテナンス
 
-### 7.1 ログの確認
+### 8.1 ログの確認
 
 ```bash
 # OpenClawログ
@@ -625,7 +501,7 @@ journalctl -u caddy -f
 htop
 ```
 
-### 7.2 定期的なメンテナンス
+### 8.2 定期メンテナンス
 
 ```bash
 # システムアップデート
@@ -633,25 +509,21 @@ apt update && apt upgrade -y
 
 # OpenClawアップデート
 /opt/update-openclaw.sh
-
-# 再起動（必要に応じて）
-/opt/restart-openclaw.sh
 ```
 
-### 7.3 バックアップ
-
-重要なファイル：
+### 8.3 バックアップ
 
 ```bash
-# OpenClaw環境変数
+# 重要なファイル
 /opt/openclaw.env
+~/.openclaw/
 
-# OpenClaw設定（openclawユーザーとして）
+# バックアップ
 su - openclaw
 tar -czf ~/openclaw-backup-$(date +%Y%m%d).tar.gz ~/.openclaw/
 exit
 
-# バックアップをダウンロード
+# ダウンロード
 scp root@YOUR_IP:/home/openclaw/openclaw-backup-*.tar.gz ./
 ```
 
@@ -659,143 +531,78 @@ scp root@YOUR_IP:/home/openclaw/openclaw-backup-*.tar.gz ./
 
 ## トラブルシューティング
 
-### 問題1: "Permission denied" エラー
+### APIレートリミットエラー
 
-**症状：** `/opt/openclaw-cli.sh` でコマンド実行時にエラー
-
-**解決策：**
-
-```bash
-# rootユーザーであることを確認
-whoami  # 出力: root
-
-# スクリプトに実行権限があることを確認
-ls -l /opt/openclaw-cli.sh
-
-# openclawユーザーが存在することを確認
-id openclaw
-```
-
-### 問題2: APIレートリミットエラー
-
-**症状：** `Rate limit exceeded` エラーが頻繁に発生
+**症状：** `Rate limit exceeded`が頻繁に出る
 
 **解決策：**
 
 ```bash
-# 現在のモデルを確認
-/opt/openclaw-cli.sh config get agents.defaults.model
-
-# OpusからSonnetに変更（推奨）
+# Sonnetに変更
 /opt/openclaw-cli.sh config set agents.defaults.model.primary "anthropic/claude-sonnet-3-5"
-
-# OpenClawを再起動
 /opt/restart-openclaw.sh
 ```
 
-**Opusのレートリミットは厳しいため、本番環境ではSonnetを使用してください。**
+### メモリ不足
 
-### 問題3: メモリ不足（OOM）
-
-**症状：** OpenClawが頻繁にクラッシュする
+**症状：** OpenClawがクラッシュする
 
 **解決策：**
 
 ```bash
-# メモリ使用量を確認
-free -h
-
-# Swapを追加（1GB RAMの場合）
+# Swapを追加
 fallocate -l 2G /swapfile
 chmod 600 /swapfile
 mkswap /swapfile
 swapon /swapfile
 echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
-# 確認
-free -h
+free -h  # 確認
 ```
 
-### 問題4: ブラウザが起動しない
+### ブラウザが起動しない
 
 **症状：** `Failed to start Chrome CDP`
 
 **解決策：**
 
 ```bash
-# Chromeを手動でテスト
+# Chromeをテスト
 google-chrome --headless --no-sandbox --disable-gpu --dump-dom https://example.com
 
-# エラーが出る場合、システムライブラリをインストール
+# エラーが出たらライブラリをインストール
 apt install -y \
   libatk1.0-0 libatk-bridge2.0-0 libcups2 \
   libxkbcommon0 libxcomposite1 libxdamage1 \
   libxrandr2 libgbm1 libpango-1.0-0 libasound2
-
-# 設定を確認
-/opt/openclaw-cli.sh browser status
 ```
 
 ---
 
 ## まとめ
 
-これで、DigitalOcean Marketplace版OpenClawを本番環境として運用する準備が整いました！
+この記事でやったこと：
 
-### 実現したこと ✅
+- OpenClaw Marketplace Dropletの作成
+- Telegramボットの接続
+- Anthropic Claude Sonnetの設定
+- 3つの問題の解決
+- ブログ自動翻訳の実装
 
-- ✅ OpenClaw Marketplace Dropletの作成
-- ✅ Anthropic Claude Sonnetの設定（レートリミット対策）
-- ✅ サンドボックス環境からのインターネットアクセス
-- ✅ ブラウザ自動化の有効化
-- ✅ Web UIへの認証追加によるセキュリティ強化
-- ✅ メッセージングチャネルの接続
+### 次のステップ
 
-### 重要なポイント 🎯
+- [OpenClaw公式ドキュメント](https://docs.openclaw.ai/)
+- [Skills](https://docs.openclaw.ai/skills)で機能拡張
+- [Heartbeat](https://docs.openclaw.ai/automation/heartbeat)で定期タスク
 
-1. **Sonnetを使用する**
-   - Opusはレートリミットが厳しく、本番環境では実用的ではない
-   - Sonnetは十分に高性能で、コストパフォーマンスも良い
+### サポート
 
-2. **Marketplace版の特徴を理解する**
-   - `/opt/openclaw-cli.sh`を使用
-   - `/opt/openclaw.env`で環境変数を管理
-   - `openclaw`ユーザーで実行される
-
-3. **セキュリティを忘れずに**
-   - Web UIにBasic認証を追加
-   - 可能であればTailscale VPNを使用
-   - 定期的にバックアップを取る
-
-### 次のステップ 🚀
-
-- [OpenClaw公式ドキュメント](https://docs.openclaw.ai/)を読む
-- [Skills](https://docs.openclaw.ai/skills)を追加してエージェントを拡張
-- [Heartbeat](https://docs.openclaw.ai/automation/heartbeat)で定期的なタスクを設定
-- [メモリ管理](https://docs.openclaw.ai/memory)でエージェントの記憶を永続化
-
-### サポート 💬
-
-- **公式Discord:** https://discord.com/invite/clawd
-- **GitHub:** https://github.com/openclaw/openclaw
-- **ドキュメント:** https://docs.openclaw.ai/
-- **Marketplace:** https://marketplace.digitalocean.com/apps/openclaw
+- Discord: https://discord.com/invite/clawd
+- GitHub: https://github.com/openclaw/openclaw
+- Docs: https://docs.openclaw.ai/
 
 ---
 
-**著者について**
+**2026年2月25日時点の情報です。**
 
-本記事は、実際のDigitalOcean Marketplace OpenClaw環境の構築と運用経験に基づいて執筆されました。
-
-**OpenClawについて**
-
-OpenClawは、AIアシスタントをメッセージングプラットフォームに接続し、自動化、メモリ管理、スキル拡張を可能にするオープンソースフレームワークです。
-
----
-
-**関連記事**
-
-- [OpenClawの基本概念](/)
-- [Telegramボットの作成方法](/)
-- [ブラウザ自動化の高度なテクニック](/)
-- [Anthropic Claude APIの使い方](/)
+OpenClawやDigitalOcean Marketplaceの仕様は変わる可能性があります。最新情報は公式ドキュメントを確認してください。
